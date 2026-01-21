@@ -1,19 +1,20 @@
 terraform {
   required_providers {
     google = {
-      source = "hashicorp/google"
+      source  = "hashicorp/google"
       version = "7.16.0"
     }
   }
 }
 
 provider "google" {
-  project     = "project-4bb40182-e231-41c4-ac4"
-  region      = "us-central1"
+  project = var.project
+  region  = var.region
 }
 
+
 resource "google_storage_bucket" "demo-bucket" {
-  name          = "project-4bb40182-e231-41c4-ac4-demo-bucket"
+  name          = var.gcs_bucket_name
   location      = "US"
   force_destroy = true
 
@@ -27,4 +28,9 @@ resource "google_storage_bucket" "demo-bucket" {
       type = "AbortIncompleteMultipartUpload"
     }
   }
+}
+
+resource "google_bigquery_dataset" "demo-dataset" {
+  dataset_id = var.bq_dataset_name
+  location   = var.location
 }
