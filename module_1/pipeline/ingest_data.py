@@ -3,6 +3,7 @@
 
 import click
 import pandas as pd
+import re
 from sqlalchemy import create_engine
 from tqdm.auto import tqdm
 
@@ -27,16 +28,51 @@ dtype = {
 
 parse_dates = [
     "tpep_pickup_datetime",
-    "tpep_dropoff_datetime"
+    "tpep_dropoff_datetime",
+    "lpep_pickup_datetime",
+    "lpep_dropoff_datetime",
 ]
 
+def to_snake(name: str) -> str:
+    name = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    name = name.replace(" ", "_").replace("-", "_")
+    return name.lower()
 
-def ingest_data(
+
+def make_colmap(cols) -> dict[str, str]:
+    return {c: to_snake(c) for c in cols}
+
+def ingest_trips(
         url: str,
         engine,
         target_table: str,
         chunksize: int = 100000,
-) -> pd.DataFrame:
+) -> None:
+    df = pd.read_parquet(url)
+    
+    colmap = make_colmap(df.columns)
+    df.rename(columns=colmap, inplace=True)
+
+    total_rows = len(df)
+    print(f"Total rows: {total_rows}")
+
+    df.head(0).to_sql(name=target_table, con=engine, if_exists="replace", index=False)
+
+    for start in tqdm(range(0, total_rows, chunksize), desc="SQL batches"):
+        end = min(start + chunksize, total_rows)
+        with engine.begin() as conn:
+            df.iloc[start:end].to_sql(
+                name=target_table,
+                con=conn,
+                if_exists="append",
+                index=False,
+                method="multi",
+                chunksize=chunksize
+                )
+    print(f"done ingesting parquet to {target_table}")
+    return
+
     df_iter = pd.read_csv(
         url,
         dtype=dtype,
@@ -46,6 +82,9 @@ def ingest_data(
     )
 
     first_chunk = next(df_iter)
+
+    colmap = make_colmap(first_chunk.columns)
+    first_chunk.rename(columns=colmap, inplace=True)
 
     first_chunk.head(0).to_sql(
         name=target_table,
@@ -71,8 +110,31 @@ def ingest_data(
         )
         print(f"Inserted chunk: {len(df_chunk)}")
 
-    print(f'done ingesting to {target_table}')
+    print(f'done ingesting csv to {target_table}')
 
+
+def ingest_zones(
+        url: str,
+        engine,
+        target_table: str = "taxi_zones",
+) -> None:
+    df = pd.read_csv(url)
+
+    colmap = make_colmap(df.columns)
+    df.rename(columns=colmap, inplace=True)
+
+    df.head(0).to_sql(name=target_table, con=engine, if_exists="replace", index=False)
+
+    with engine.begin() as conn:
+        df.to_sql(
+            name=target_table,
+            con=conn,
+            if_exists="append",
+            index=False,
+            method="multi"
+        )
+
+    print(f"done ingesting zones to {target_table}")
 
 
 @click.command()
@@ -81,21 +143,31 @@ def ingest_data(
 @click.option('--pg-host', default='localhost', help='PostgreSQL host')
 @click.option('--pg-port', default='5432', help='PostgreSQL port')
 @click.option('--pg-db', default='ny_taxi', help='PostgreSQL database name')
+
 @click.option('--year', default=2021, type=int, help='Year of the data')
 @click.option('--month', default=1, type=int, help='Month of the data')
 @click.option('--chunksize', default=100000, type=int, help='Chunk size for ingestion')
-@click.option('--target-table', default='yellow_taxi_data', help='Target table name')
-def main(pg_user, pg_pass, pg_host, pg_port, pg_db, year, month, chunksize, target_table):
+
+@click.option('--target-table', default='green_taxi_trips', help='Target table name')
+@click.option('--zones-table', default='taxi_zones', help='Zones target table name')
+
+def main(pg_user, pg_pass, pg_host, pg_port, pg_db, year, month, chunksize, target_table, zones_table):
     engine = create_engine(f'postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}')
     
-    url_prefix = 'https://github.com/DataTalksClub/nyc-tlc-data/releases/download/yellow'
-    url = f'{url_prefix}/yellow_tripdata_{year:04d}-{month:02d}.csv.gz'
+    trips_url = f"https://d37ci6vzurychx.cloudfront.net/trip-data/green_tripdata_{year:04d}-{month:02d}.parquet"
+    zones_url = "https://github.com/DataTalksClub/nyc-tlc-data/releases/download/misc/taxi_zone_lookup.csv"
 
-    ingest_data(
-        url=url,
+    ingest_trips(
+        url=trips_url,
         engine=engine,
         target_table=target_table,
         chunksize=chunksize
+    )
+
+    ingest_zones(
+        url=zones_url,
+        engine=engine,
+        target_table=zones_table
     )
 
 if __name__ == '__main__':

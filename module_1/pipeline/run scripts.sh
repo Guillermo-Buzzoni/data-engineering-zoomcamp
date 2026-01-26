@@ -1,3 +1,5 @@
+# Collection of scripts to run Docker containers for PostgreSQL and data ingestion - not meant to be executed as a single script.
+
 # Run PostgreSQL on the network
 docker run -it --rm \
   -e POSTGRES_USER="root" \
@@ -9,34 +11,21 @@ docker run -it --rm \
   --name pgdatabase \
   postgres:18
 
-# Run the Containerized Ingestion
-docker run -it --rm \
-  --network=pg-network \
-  taxi_ingest:v001 \
-    --pg-user=root \
-    --pg-pass=root \
-    --pg-host=pgdatabase \
-    --pg-port=5432 \
-    --pg-db=ny_taxi \
-    --target-table=yellow_taxi_trips_2021_2 \
-    --year=2021 \
-    --month=2 \
-    --chunksize=100000
-
-# Run the Containerized Ingestion -network=pipeline_default
-docker run -it --rm \
-  --network=pipeline_default \
-  taxi_ingest:v001 \
-    --pg-user=root \
-    --pg-pass=root \
-    --pg-host=pgdatabase \
-    --pg-port=5432 \
-    --pg-db=ny_taxi \
-    --target-table=yellow_taxi_trips_2021_2 \
-    --chunksize=100000
+# Run the Containerized Ingestion -network=pg-network
+docker run --rm -it --network=pg-network taxi_ingest:nov2025 \
+  --pg-user root \
+  --pg-pass root \
+  --pg-host pgdatabase \
+  --pg-port 5432 \
+  --pg-db ny_taxi \
+  --year 2025 \
+  --month 11 \
+  --chunksize 100000 \
+  --target-table green_taxi_trips \
+  --zones-table taxi_zones
 
 # In another terminal, run pgAdmin on the same network
-docker run -it \
+docker run -it --rm \
   -e PGADMIN_DEFAULT_EMAIL="admin@admin.com" \
   -e PGADMIN_DEFAULT_PASSWORD="root" \
   -v pgadmin_data:/var/lib/pgadmin \
@@ -55,3 +44,5 @@ uv run python ingest_data.py \
   --year=2021 \
   --month=1 \
   --chunksize=100000
+
+docker start pgadmin
